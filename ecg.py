@@ -75,10 +75,12 @@ class Ecg:
 
     def pw_analyze(self, ret=True):
         """Extract spectral, metric features characterizing P-wave via P-wave analyzer obj."""
-        self.p_features_spectral, self.p_features_metric = self.__pw_analyzer.process()
+        #self.p_features_spectral, self.p_features_metric = self.__pw_analyzer.process()
+        sm = self.__pw_analyzer.process()
         print('P-wave is analyzed well...')
         if ret:
-            return self.p_features_spectral.copy(), self.p_features_metric.copy()
+            #return self.p_features_spectral.copy(), self.p_features_metric.copy()
+            return sm
 
     """Some setters: """
     def set_loader(self, loader=None):

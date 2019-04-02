@@ -135,15 +135,17 @@ class PWaveAnalyzer(AbstractWaveAnalyzer):
         out_dict['pr_samp'] = rpeak - p_to_q_max_coord  # Sample diff-ce btwn R and P
         out_dict['pq_samp'] = q_coord - p_to_q_max_coord  # Sample diff-ce btwn P and Q
         out_dict['qr_samp'] = rpeak - q_coord  # Sample diff-ce btwn R and Q
+        out_dict['q_coord'] = q_coord
+        out_dict['p_coord_rough'] = p_to_q_max_coord
         return out_dict
 
     def process(self):
         features = []
-        for template in self.templates[:1]:
+        for template in self.templates:
             r_to_q = self.cut_off_rq(template, self.rpeak)  # get R to Q segment of the wave
             if r_to_q is None:
                 continue
             spectral_features = self.spectral_analyzing(r_to_q)  # get spectral features
             metrical_features = self.metrical_analyzing(template, r_to_q, self.rpeak)  # get metrical features
             features.append((spectral_features, metrical_features))
-        return np.array(*features)
+        return features

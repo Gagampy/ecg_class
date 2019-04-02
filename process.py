@@ -69,7 +69,7 @@ class CorrelationTemplator(AbstractTemplator):
         by finding the most correlated 3 btwn them. """
         templates = []
         rpeaks_templates = []
-        for segm_idx in range(len(self.segments)-n_segments):
+        for segm_idx in range(0, len(self.segments)-n_segments, 2):
             segments_to_check_corr = self.segments[segm_idx:segm_idx+n_segments]
             try:
                 correlation = np.corrcoef(segments_to_check_corr)
