@@ -45,6 +45,13 @@ class BioSppyFilter(AbstractFilter):
         return out_tuple['filtered']
 
 
+class BlankFilter(AbstractFilter):
+    """Wrapper for non-filtering function."""
+    def process(self):
+        """Return self.record"""
+        return self.record
+
+
 ########################################### TEMPLATORS ######################################################
 class AbstractTemplator(AbstractProcessor):
     """Abstract class for mean template ECG wave extractors."""

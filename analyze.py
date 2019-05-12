@@ -5,14 +5,15 @@ from biosppy.signals import ecg as bioecg
 import numpy as np
 
 
-########################################### QRS SEEKERS ###############################################################
-class AbstractQrsSeeker(AbstractProcessor):
+########################################### SEEKERS ###############################################################
+class AbstractSeeker:
     def __init__(self):
         self.record = None
         self.fs = None
+        self.r_coords = []
 
     @abstractmethod
-    def process(self):
+    def seek(self):
         """Should return samples of R peaks
         and calculated hr."""
         pass
@@ -21,12 +22,20 @@ class AbstractQrsSeeker(AbstractProcessor):
         self.record = record
         self.fs = fs
 
+
+class AbstractQrsSeeker(AbstractSeeker):
     @staticmethod
     def calculate_rr(rpeaks):
         """Just calculate RR as a median of
         cumulative diff-ce of RPeaks array."""
         cumdiff = np.diff(rpeaks)
         return int(np.median(cumdiff))
+
+    @abstractmethod
+    def seek(self):
+        """Should return samples of R peaks
+        and calculated hr."""
+        pass
 
     def segment_cycles(self, rpeaks):
         """Get median RR interval and extract ECG cycles to an array."""
@@ -51,36 +60,93 @@ class AbstractQrsSeeker(AbstractProcessor):
 
 class BioSppyQrsSeeker(AbstractQrsSeeker):
     """Wrapper for Biosppy ecg function, returns R peaks coords and HR."""
-    def process(self):
-        rpeaks = bioecg.ecg(self.record, show=False, sampling_rate=self.fs)['rpeaks']
-        cycles, rpeaks_relative, median_rr = self.segment_cycles(rpeaks)
-        return rpeaks, median_rr, cycles, rpeaks_relative
+    def seek(self):
+        self.r_coords = bioecg.ecg(self.record, show=False, sampling_rate=self.fs)['rpeaks']
+        cycles, rpeaks_relative, median_rr = self.segment_cycles(self.r_coords)
+        return self.r_coords.copy(), median_rr, cycles, rpeaks_relative
 
 
 class EngzeeQrsSeeker(AbstractQrsSeeker):
     """Wrapper for Biosppy Engzee + Lourenco algorithm with threshold 0.48."""
-    def process(self):
+    def seek(self):
         """Locate R peaks and segment ECG cycles."""
-        rpeaks = bioecg.engzee_segmenter(self.record, sampling_rate=self.fs)['rpeaks']
-        cycles, rpeaks_relative, median_rr = self.segment_cycles(rpeaks)
-        return rpeaks, median_rr, cycles, rpeaks_relative
+        self.r_coords = bioecg.engzee_segmenter(np.ravel(self.record), sampling_rate=self.fs)['rpeaks']
+        cycles, rpeaks_relative, median_rr = self.segment_cycles(self.r_coords)
+        return self.r_coords.copy(), median_rr, cycles, rpeaks_relative
 
+
+class PWaveSeeker(AbstractSeeker):
+    """Class to detect P-wave and get it's coordinates on a filtered record."""
+    def __init__(self):
+        super().__init__()
+        self.p_to_r = None
+        self.q_to_r = None
+
+    def attach(self, record, rpeaks, fs):
+        """Attach filtered record and it's rpeaks to the seeker."""
+        super().attach(record, fs)
+        self.r_coords = rpeaks
+        self.p_to_r = int(fs * 0.2)  # 0.2 sec from R - low border of P-w start
+        self.q_to_r = 20  # VERY roughly!!!
+
+    def seek(self):
+        """Find coordinates of P-peaks on filtered record as coordinates of a local maximum within borders."""
+        ppeaks = np.array([])
+        for rpeak in self.r_coords:
+            lowborder = rpeak - self.p_to_r
+            highborder = rpeak - self.q_to_r
+            # Bordercases:
+            if highborder < 0:
+                break
+            if lowborder < 0:
+                lowborder = 0
+            # Get P-wave coord:
+            ppeaks = np.append(ppeaks, np.argmax(self.record[lowborder:highborder]) + lowborder)
+        return ppeaks
+
+
+class TWaveSeeker(AbstractSeeker):
+    """Class to detect T-wave and get it's coordinates on a filtered record."""
+    def __init__(self):
+        super().__init__()
+        self.r_to_s = None
+        self.r_to_t = None
+
+    def attach(self, record, rpeaks, fs):
+        super().attach(record, fs)
+        self.r_coords = rpeaks
+        self.r_to_s = int(fs * 0.11)  # mean duration from R to the end of S-wave
+        self.r_to_t = int(fs * 0.28)  # mean duration from R to the end of T-wave
+
+    def seek(self):
+        """Find coordinates of T-peaks on filtered record as coordinates of a local maximum within borders."""
+        tpeaks = np.array([])
+        record_len = len(self.record)
+        for rpeak in self.r_coords:
+            lowborder = rpeak + self.r_to_s
+            highborder = rpeak + self.r_to_t
+            # Bordercases:
+            if lowborder > record_len:
+                break
+            if highborder > record_len:
+                highborder = record_len
+            # Get T-wave coord:
+            tpeaks = np.append(tpeaks, np.argmax(self.record[lowborder:highborder]) + lowborder)
+        return tpeaks
 
 ############################################# ANALYZERS ################################################################
 class AbstractWaveAnalyzer(AbstractProcessor):
-    """Abstract class for different wave analyzers:
-    f.e. T-wave, QRS-wave, P-wave, ST-segment and so on.
-    """
+    """Abstract class for different wave analyzers: f.e. T-wave, QRS-wave, P-wave, ST-segment and so on."""
     def __init__(self):
-        self.templates = []
-        self.rpeak = None
+        self.templates = []  # List of templates
+        self.record = []  # Filtered record
+        self.rpeak = None  # Coordinate where R-peak located on every template
+        self.rpeaks = []  # List of R-peak coordinates on the filtered record
         self.fs = None
         self.p_to_r = None
         self.q_to_r = None
 
-    def attach(self, templates, rpeak, fs):
-        self.templates = templates
-        self.rpeak = rpeak
+    def attach(self, fs):
         self.fs = fs
         self.p_to_r = int(fs * 0.2)  # 0.2 sec from R - low border of P-w start
         self.q_to_r = 20  # VERY roughly!!!
@@ -98,9 +164,12 @@ class AbstractWaveAnalyzer(AbstractProcessor):
 
 
 class PWaveAnalyzer(AbstractWaveAnalyzer):
-    """Class to detect P-wave and extract some
-    features from it.
-    """
+    """Class to detect P-wave on PQRST templates and extract it's features."""
+    def attach(self, templates, rpeak, fs):
+        super().attach(fs)
+        self.templates = templates
+        self.rpeak = rpeak
+
     def spectral_analyzing(self, r_to_q):
         """Get spectral power density (SPD) and return it's maximum,
         the maximum's coordinate in Hz and area of SPD."""

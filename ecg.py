@@ -4,12 +4,15 @@ from MyModules.ecg_class.loader import CsvLoader, WavLoader
 
 class Ecg:
     """An ecg main class. """
-    def __init__(self, loader, rec_filter=None, r_seeker=None, pw_analyzer = None, visualizator=None, fs=None):
+    def __init__(self, loader, rec_filter=None, r_seeker=None, p_seeker=None, t_seeker=None, pw_analyzer=None,
+                 visualizator=None, fs=None):
         # Some processor classes
         self.__loader = loader  # takes EcgLoader class obj
-        self.__rec_filter = rec_filter  # filter
+        self.__rec_filter = rec_filter  # filter obj
         self.__pw_analyzer = pw_analyzer
         self.__r_seeker = r_seeker  # class to find R coords
+        self.__p_seeker = p_seeker  # class to find P coords
+        self.__t_seeker = t_seeker  # class to find T coords
         self.__visualizator = visualizator  #
         self.__templator = None
 
@@ -19,7 +22,9 @@ class Ecg:
         self.__fs = fs
 
         # Some ecg's features
-        self.rpeaks = []
+        self.r_coords = []
+        self.p_coords = []
+        self.t_coords = []
         self.__rr = None
         self.templates = []
         self.temp_rpeaks = []
@@ -47,22 +52,33 @@ class Ecg:
         if ret:
             return self.filtered_record.copy()
 
-    def find_qrs(self, ret=True):
-        """Seek R peaks via seeker obj and
-        return their coordinates and
-        estimated HR.
-        """
-        out_tuple = self.__r_seeker.process()  # get array with r coords
-        self.rpeaks = out_tuple[0]  # R peak coord-tes
+    def seek_r(self, ret=True):
+        """Seek R peaks via seeker obj and return their coordinates and estimated HR."""
+        out_tuple = self.__r_seeker.seek()  # get array with r coords
+        self.r_coords = out_tuple[0]  # R peak coord-tes
         self.__rr = out_tuple[1]  # get RR interval
         self.cycles = out_tuple[2]  # Ecg segments
         self.rpeaks_templates_start_coord = out_tuple[3]  # R coords relative to cycle start
-        print('Qrs found, median rr-interval estimated...')
+        print('R-peaks found, median rr-interval estimated...')
         if ret:
             return {'rpeaks': out_tuple[0].copy(),
                     'rr': out_tuple[1],
                     'Segments': out_tuple[2].copy(),
                     'r_start': out_tuple[3]}
+
+    def seek_p(self, ret=True):
+        """Seek P peaks via seeker obj and return their coordinates."""
+        self.p_coords = self.__p_seeker.seek()
+        print('P-peaks found...')
+        if ret:
+            return self.p_coords.copy()
+
+    def seek_t(self, ret=True):
+        """Seek T peaks via seeker obj and return their coordinates."""
+        self.t_coords = self.__t_seeker.seek()
+        print('T-peaks found...')
+        if ret:
+            return self.t_coords.copy()
 
     def template(self, ret=True):
         """Create mean templates of ECG
@@ -75,11 +91,9 @@ class Ecg:
 
     def pw_analyze(self, ret=True):
         """Extract spectral, metric features characterizing P-wave via P-wave analyzer obj."""
-        #self.p_features_spectral, self.p_features_metric = self.__pw_analyzer.process()
         sm = self.__pw_analyzer.process()
         print('P-wave is analyzed well...')
         if ret:
-            #return self.p_features_spectral.copy(), self.p_features_metric.copy()
             return sm
 
     """Some setters: """
@@ -93,7 +107,25 @@ class Ecg:
         if self.__r_seeker is None:
             raise ValueError('R seeker should be initialized by an AbstractFilter inheritor.')
         self.__r_seeker.attach(self.filtered_record, self.__fs)
-        print('Seeker is set...')
+        print('R seeker is set...')
+
+    def set_p_seeker(self, seeker=None):
+        if seeker is not None:
+            self.__p_seeker = seeker
+        # If seeker wasn't initialized neither here or in __init__:
+        if self.__p_seeker is None:
+            raise ValueError('P seeker should be initialized by an AbstractFilter inheritor.')
+        self.__p_seeker.attach(self.filtered_record, self.r_coords, self.__fs)
+        print('P seeker is set...')
+
+    def set_t_seeker(self, seeker=None):
+        if seeker is not None:
+            self.__t_seeker = seeker
+        # If seeker wasn't initialized neither here or in __init__:
+        if self.__t_seeker is None:
+            raise ValueError('T seeker should be initialized by an AbstractFilter inheritor.')
+        self.__t_seeker.attach(self.filtered_record, self.r_coords, self.__fs)
+        print('T seeker is set...')
 
     def set_filter(self, rec_filter=None):
         if rec_filter is not None:

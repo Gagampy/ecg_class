@@ -35,8 +35,12 @@ class CsvLoader(AbstractLoader):
     """Class to load ECG records from *.csv files."""
     def load_record(self, header='infer', index_col=None):
         """Load record from *.csv to pd.DataFrame."""
-        print('Loading...', self.rec_name)
-        whole_path = self.init_path + self.rec_name + '.csv'
+        if str(self.rec_name)[-4:] == '.csv':
+            whole_path = self.init_path + self.rec_name
+            print('Loading...', self.rec_name)
+        else:
+            whole_path = self.init_path + self.rec_name + '.csv'
+            print('Loading...', self.rec_name + '.csv')
         return pd.read_csv(whole_path, header=header, index_col=index_col)
 
 
